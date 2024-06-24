@@ -300,6 +300,14 @@ def common_export(
         with torch.no_grad():
             prog = torch.onnx.dynamo_export(model, *inputs)
         onnx.save(prog.model_proto, filename)
+    elif exporter == "custom":
+        assert (
+            dynamic_shapes is None
+        ), f"dynamic_shapes={dynamic_shapes} is not implemented yet"
+        from experimental_experiment.torch_interpreter import to_onnx
+        with torch.no_grad():
+            prog = to_onnx(model, inputs)
+        onnx.save(prog, filename)
     else:
         raise ValueError(f"Unknown exporter {exporter!r}")
 
