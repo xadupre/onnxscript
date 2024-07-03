@@ -66,95 +66,51 @@ def _prepare_config_and_inputs(
     )
 
 
-def get_phi_model(
+def get_mistral_model(
     input_dims: Sequence[tuple[int, int]] = ((13, 7), (14, 7), (15, 8)),
-    hidden_size: int = 32,
-    num_hidden_layers: int = 2,
-    vocab_size: int = 99,
-    intermediate_size: int = 16,
-    max_position_embeddings: int = 512,
-    num_attention_heads: int = 4,
-    num_key_value_heads: int = 2,
-    _attn_implementation: str = "eager",  # needed value to remove graph breaks
+    hidden_size=32,
+    num_hidden_layers=2,
+    vocab_size=99,
+    intermediate_size=16,
+    max_position_embeddings=512,
+    num_attention_heads=2,
+    num_key_value_heads=2,
+    sliding_window=4096,
+    _attn_implementation="eager",  # needed value to remove graph breaks
     with_mask: bool = True,
 ) -> tuple[Any, list[tuple[torch.Tensor, ...]], dict]:
     """
     Returns a model.
-    See `PhiConfig
-    <https://huggingface.co/docs/transformers/main/en/model_doc/phi#transformers.PhiConfig>`_.
-    The parameters are chosen for a unit test configuration from `test_modeling_phi.py
-    <https://github.com/huggingface/transformers/blob/main/tests/models/phi/test_modeling_phi.py>`_.
+    See `MistralConfig
+    <https://huggingface.co/docs/transformers/main/en/model_doc/mistral#transformers.MistralConfig>`_.
+    The parameters are chosen for a unit test configuration.
     """
-    from transformers import PhiConfig
-    from transformers.models.phi.modeling_phi import PhiModel
+    from transformers import MistralConfig
+    from transformers.models.mistral.modeling_mistral import MistralModel
+
+    config = MistralConfig(
+        num_hidden_layers=num_hidden_layers,
+        vocab_size=vocab_size,
+        hidden_size=hidden_size,
+        intermediate_size=intermediate_size,
+        max_position_embeddings=max_position_embeddings,
+        num_attention_heads=num_attention_heads,
+        num_key_value_heads=num_key_value_heads,
+        sliding_window=sliding_window,
+    )
 
     dynamic_shapes = {0: {0: "batch", 1: "length"}}
     if with_mask:
         dynamic_shapes.update({1: {0: "batch", 1: "length"}})
 
-    config = PhiConfig(
-        hidden_size=hidden_size,
-        num_hidden_layers=num_hidden_layers,
-        vocab_size=vocab_size,
-        intermediate_size=intermediate_size,
-        max_position_embeddings=max_position_embeddings,
-        num_attention_heads=num_attention_heads,
-        num_key_value_heads=num_key_value_heads,
-    )
     if _attn_implementation:
         config._attn_implementation = _attn_implementation  # pylint: disable=protected-access
 
-    if with_mask:
-
-        class PhiModelWrapper(torch.nn.Module):
-            def __init__(self, config):
-                super().__init__()
-                self.model = PhiModel(config)
-
-            def forward(self, input_ids, attention_mask):
-                model_output = self.model(
-                    input_ids, attention_mask=attention_mask, use_cache=False
-                )
-                return model_output.to_tuple()
-
-        def generate_example_inputs(batch: int, seq: int, vocab_size: int):
-            (
-                input_ids,
-                _,  # token_type_ids,
-                input_mask,
-                _,  # sequence_labels,
-                _,  # token_labels,
-                _,  # choice_labels,
-            ) = _prepare_config_and_inputs(
-                batch_size=batch,
-                seq_length=seq,
-                vocab_size=vocab_size,
-                use_input_mask=True,
-            )
-            return input_ids, input_mask
-
-        example_args_collection = []
-        for b, s in input_dims:
-            example_args_collection.append(generate_example_inputs(b, s, vocab_size))
-
-        return PhiModelWrapper(config), example_args_collection, dynamic_shapes
-
-    # no mask
-
-    class PhiModelWrapperNoMask(torch.nn.Module):
-        def __init__(self, config):
-            super().__init__()
-            self.model = PhiModel(config)
-
-        def forward(self, input_ids):
-            model_output = self.model(input_ids, use_cache=False)
-            return model_output.to_tuple()
-
-    def generate_example_inputs_no_mask(batch: int, seq: int, vocab_size: int):
+    def generate_example_inputs(batch: int, seq: int, vocab_size: int, with_mask: bool):
         (
             input_ids,
             _,  # token_type_ids,
-            _,  # input_mask,
+            input_mask,
             _,  # sequence_labels,
             _,  # token_labels,
             _,  # choice_labels,
@@ -162,18 +118,50 @@ def get_phi_model(
             batch_size=batch,
             seq_length=seq,
             vocab_size=vocab_size,
-            use_input_mask=True,
+            use_input_mask=with_mask,
         )
+        if with_mask:
+            return input_ids, input_mask
         return (input_ids,)
+
+    if with_mask:
+
+        class MistralModelWrapperWithMask(torch.nn.Module):
+            def __init__(self, config):
+                super().__init__()
+                self.model = MistralModel(config)
+
+            def forward(self, input_ids, attention_mask):
+                model_output = self.model(
+                    input_ids, attention_mask=attention_mask, use_cache=False
+                )
+                return model_output.to_tuple()
+
+        example_args_collection = []
+        for b, s in input_dims:
+            example_args_collection.append(
+                generate_example_inputs(b, s, vocab_size, with_mask)
+            )
+
+        return MistralModelWrapperWithMask(config), example_args_collection, dynamic_shapes
+
+    class MistralModelWrapper(torch.nn.Module):
+        def __init__(self, config):
+            super().__init__()
+            self.model = MistralModel(config)
+
+        def forward(self, input_ids):
+            model_output = self.model(input_ids, use_cache=False)
+            return model_output.to_tuple()
 
     example_args_collection = []
     for b, s in input_dims:
-        example_args_collection.append(generate_example_inputs_no_mask(b, s, vocab_size))
+        example_args_collection.append(generate_example_inputs(b, s, vocab_size, with_mask))
 
-    return PhiModelWrapperNoMask(config), example_args_collection, dynamic_shapes
+    return MistralModelWrapper(config), example_args_collection, dynamic_shapes
 
 
-def get_phi_model_from_config(
+def get_mistral_model_from_config(
     warmup: int = 5,
     repeat: int = 10,
     config: str = "small",
@@ -224,6 +212,7 @@ def get_phi_model_from_config(
             num_attention_heads=4,
             num_key_value_heads=4,
             max_position_embeddings=1024,
+            sliding_window=4096,
             _attn_implementation=implementation,
             with_mask=with_mask,
         )
@@ -232,17 +221,18 @@ def get_phi_model_from_config(
             input_dims=onnxscript.tools.transformers_models.get_input_dims_for_llm(
                 dynamic_shapes, warmup, repeat
             ),
-            hidden_size=2048,
+            hidden_size=4096,
             num_hidden_layers=num_hidden_layers,
-            vocab_size=51200,
-            intermediate_size=8192,
+            vocab_size=32000,
+            intermediate_size=14336,
             num_attention_heads=32,
-            num_key_value_heads=None,
-            max_position_embeddings=2048,
+            num_key_value_heads=8,
+            max_position_embeddings=131072,
+            sliding_window=4096,
             _attn_implementation=implementation,
             with_mask=with_mask,
         )
     else:
         raise ValueError(f"Unexpected configuration {config!r}.")
 
-    return get_phi_model(**conf_dict)  # type: ignore[arg-type]
+    return get_mistral_model(**conf_dict)  # type: ignore[arg-type]
