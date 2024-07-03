@@ -254,6 +254,20 @@ def common_export(
         with torch.no_grad():
             prog = torch.onnx.dynamo_export(model, *inputs)
         onnx.save(prog.model_proto, filename)
+
+    elif exporter == "custom":
+        from experimental_experiment.torch_interpreter import to_onnx
+        from experimental_experiment.xbuilder import OptimizationOptions
+
+        mc = to_onnx(
+            model,
+            inputs,
+            target_opset=target_opset,
+            options=OptimizationOptions(patterns="default+onnxruntime+experimental"),
+            large_model=True,
+        )
+        mc.save(filename, True)
+        mc.save(filename + ".2.onnx", True)
     else:
         raise ValueError(f"Unknown exporter {exporter!r}")
 
